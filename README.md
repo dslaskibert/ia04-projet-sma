@@ -2,7 +2,7 @@
 
 Projet de groupe en **IA04 (Systèmes Multi-Agents)** à l'UTC, en automne 2026
 
-Simulation multi-agent en Go d'un réseau de bornes de recharge pour véhicules électriques autonomes, visant à étudier l'impact du partage d'information entre agents sur la performance collective du réseau. [Note détaillant le sujet](notes_sujet/notes.md)
+Simulation multi-agent en Go d'un réseau de bornes de recharge pour véhicules électriques autonomes, visant à étudier l'impact du partage d'information entre agents sur la performance collective du réseau. [Note détaillant le sujet](note_sujet/notes.md)
 
 ## Groupe
 
