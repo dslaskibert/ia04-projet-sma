@@ -27,3 +27,11 @@ func (minutes SimTime) MinuteOfDay() int {
 
 // type prix
 type Price float64 // prix en centimes d'euros /kWh
+
+// types du graphe représentant la carte
+type NodeID int
+
+type Position struct {
+	X float64
+	Y float64
+}
