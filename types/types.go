@@ -1,5 +1,13 @@
 package types
 
+// types agents
+type AgentType string
+
+const (
+	AgentTypeCar     AgentType = "car"
+	AgentTypeStation AgentType = "station"
+)
+
 // types ID
 type CarID int
 type StationID int
