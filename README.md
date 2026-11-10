@@ -12,3 +12,19 @@ Simulation multi-agent en Go d'un réseau de bornes de recharge pour véhicules 
 - Arthur Erzinger De Lima
 
 Suivi par M. Sylvain Lagrue
+
+## Structure du projet
+
+```
+agent/ interfaces et implémentations des agents (voitures, stations, ...)
+environment/ graphes et cartes
+simulation/ moteur de simulation
+types/ types partagés entre packages
+cmd/simulation/ fichier main
+```
+
+## Lancement du projet
+
+```
+go run cmd/simulation/main.go
+```
