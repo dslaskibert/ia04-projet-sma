@@ -6,6 +6,7 @@ type AgentType string
 const (
 	AgentTypeCar     AgentType = "car"
 	AgentTypeStation AgentType = "station"
+	AgentTypeTest    AgentType = "test"
 )
 
 // types ID
