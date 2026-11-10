@@ -7,7 +7,7 @@ import (
 )
 
 type Agent interface {
-	ID() string
+	Name() string
 	Type() types.AgentType
 	Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut chan<- struct{})
 }
