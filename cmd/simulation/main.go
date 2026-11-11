@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
+	"github.com/dslaskibert/ia04-projet-sma/agent/station"
 	"github.com/dslaskibert/ia04-projet-sma/simulation"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
@@ -21,6 +22,12 @@ func main() {
 	// Créer agents
 	agtTest := agent.NewAgentTest("test", types.AgentTypeTest)
 	simu.RegisterAgent(agtTest)
+
+	// Créer les stations (Judith)
+	station1 := station.NewStation(1, 33, 4, 50, 30)
+	station2 := station.NewStation(2, 77, 4, 50, 30)
+	simu.RegisterAgent(station1)
+	simu.RegisterAgent(station2)
 
 	// Lancer la simulation
 	ctx, cancel := context.WithCancel(context.Background())
