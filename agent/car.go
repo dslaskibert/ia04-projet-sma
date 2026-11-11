@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"math/rand"
 
+	"github.com/dslaskibert/ia04-projet-sma/environment"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
 
@@ -65,11 +67,14 @@ type Car struct {
 	State           CarState
 	TargetStationID types.StationID
 
+	Map             environment.Map
+	Rng             *rand.Rand
+
 	In_perception 	chan CarPerception
 	Out_Action    	chan CarAction
 }
 
-func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consumption float64) *Car {
+func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consumption float64, envMap environment.Map, rng *rand.Rand) *Car {
 	return &Car{
 		ID:            id,
 		OriginNode:    orig,
@@ -79,6 +84,8 @@ func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consum
 		MaxBattery:    maxBattery,
 		Consumption:   consumption,
 		State:         StateInRoute,
+		Map:           envMap,
+		Rng:           rng,
 		In_perception: make(chan CarPerception),
 		Out_Action:    make(chan CarAction),
 	}
@@ -103,23 +110,11 @@ func (c *Car) Start(ctx context.Context) {
 	}
 }
 
-func (c *Car) Range(batteryLevel float64) float64 {
+func (c *Car) Range() float64 {
 	if c.Consumption <= 0 {
 		return 0
 	}
-	return (batteryLevel * c.MaxBattery) / c.Consumption
-}
-
-func (c *Car) SearchStation(percept CarPerception) types.StationID {
-	if len(percept.StationInfos) > 0 {
-		return percept.StationInfos[0].StationID
-	}
-	return 0
-}
-
-func (c *Car) NewRandomDestination() types.NodeID {
-	// TODO: select the next random destiny
-	return c.DestNode
+	return (c.BatteryLevel * c.MaxBattery) / c.Consumption
 }
 
 // every agent car will have a destination, and it's goal is to reach this destination, when it does, another destination will be given randonly.
@@ -136,12 +131,19 @@ func (c *Car) Decide (percept CarPerception) CarAction {
 
 	switch c.State {
 		case StateInRoute:
-			//check the battery
-				//if the battery level is lower then 25% or not enouth to arrive at destination
-					//search a Station
-					// State <- StateToStation
-			if (c.BatteryLevel < 0.25 || c.DistDest() > c.Range(c.BatteryLevel)) {
-				c.TargetStationID = c.SearchStation(percept)
+			_, distDest, _ := c.Map.ShortestPath(c.CurrentNode, c.DestNode)
+			if c.BatteryLevel < 0.25 || distDest > c.Range() {
+				var bestStation types.StationID
+				var minDist float64 = -1
+				for _, info := range percept.StationInfos {
+					_, dist, err := c.Map.ShortestPath(c.CurrentNode, info.NodeID)
+					if err == nil && (minDist < 0 || dist < minDist) {
+						minDist = dist
+						bestStation = info.StationID
+					}
+				}
+
+				c.TargetStationID = bestStation
 				c.State = StateToStation
 				return CarAction{
 					CarID:    c.ID,
@@ -155,17 +157,13 @@ func (c *Car) Decide (percept CarPerception) CarAction {
 				TargetID: types.StationID(c.DestNode),
 			}
 		case StateToStation:
-			//change destination *put a temporary destination (the station)
-			//State <- StateInRoute
 			return CarAction{
 				CarID:    c.ID,
 				Type:     ActionGoToStation,
 				TargetID: c.TargetStationID,
 			}
 		case StateArrivedDestination:
-			//ask for another destination
-				//State <- StateInRoute
-			c.DestNode = c.NewRandomDestination()
+			_, c.DestNode = c.Map.RandomOriginDestination(c.Rng)
 			c.State = StateInRoute
 			return CarAction{
 				CarID:    c.ID,
@@ -173,11 +171,6 @@ func (c *Car) Decide (percept CarPerception) CarAction {
 				TargetID: types.StationID(c.DestNode),
 			}
 		case StateAtStation:
-			//if there's a queue | QueueLength > 0?
-				//wait
-					//then charge
-			//if there's no queue
-				//State <- CHARGING
 			if QueueLength > 0 {
 				c.State = StateInLine
 
@@ -196,8 +189,6 @@ func (c *Car) Decide (percept CarPerception) CarAction {
 				}
 			}
 		case StateInLine:
-			//wait					
-				//State <- CHARGING
 			if QueueLength == 0 {
 				c.State = StateCharging
 
@@ -215,8 +206,6 @@ func (c *Car) Decide (percept CarPerception) CarAction {
 			}
 		case StateCharging:
 			//obs: maybe add some randon (the car leaves before reach 100%)
-			//wait	
-				//State <- IN_ROUTE
 			if c.BatteryLevel >= 1 {
 				c.State = StateInRoute
 
