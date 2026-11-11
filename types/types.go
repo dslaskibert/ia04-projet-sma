@@ -13,7 +13,7 @@ type CarID int
 type StationID int
 
 // type temps
-type SimTime int // temps écolué depuis le début en minutes
+type SimTime int // temps écoulé depuis le début en minutes
 
 // récupérer le nombre de jours de la simulation
 func (minutes SimTime) Day() int {
