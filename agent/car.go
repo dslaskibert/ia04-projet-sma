@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 
 	"github.com/dslaskibert/ia04-projet-sma/environment"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
+
+var _ Agent = (*Car)(nil)
 
 type CarState string
 
@@ -91,21 +94,22 @@ func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consum
 	}
 }
 
-func (c *Car) Start(ctx context.Context) {
+func (c *Car) Name() string {
+	return fmt.Sprintf("car-%d", c.ID)
+}
+
+func (c *Car) Type() types.AgentType {
+	return types.AgentTypeCar
+}
+
+func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut chan<- struct{}) {
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return
-		case percept, ok := <- c.In_perception:
-			if !ok {
-				return
-			}
-			c.CurrentNode = percept.NodePosition
-			c.BatteryLevel = percept.BatteryLevel
-
-			action := c.Decide(percept)
-
-			c.Out_Action <- action
+		case now := <-tickIn:
+			fmt.Printf("[%s] tick %d received (state: %s, battery: %.1f%%)\n", c.Name(), now, c.State, c.BatteryLevel*100)
+			doneOut <- struct{}{}
 		}
 	}
 }
