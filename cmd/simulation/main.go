@@ -6,6 +6,7 @@ import (
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
 	"github.com/dslaskibert/ia04-projet-sma/agent/station"
+	"github.com/dslaskibert/ia04-projet-sma/environment/gridmap"
 	"github.com/dslaskibert/ia04-projet-sma/simulation"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
@@ -14,7 +15,8 @@ func main() {
 	fmt.Println("Hello World")
 
 	// Créer carte
-	// carte := gridmap.NewGridMap(10, 10, 100.0, [][2]int{{3, 3}, {7, 7}})
+	carte := gridmap.NewGridMap(10, 5, 100.0, [][2]int{{3, 3}, {7, 7}})
+	carte.Print()
 
 	// Créer simulation
 	simu := simulation.NewSimu()
@@ -23,11 +25,11 @@ func main() {
 	agtTest := agent.NewAgentTest("test", types.AgentTypeTest)
 	simu.RegisterAgent(agtTest)
 
-	// Créer les stations (Judith)
-	station1 := station.NewStation(1, 33, 4, 50, 30)
-	station2 := station.NewStation(2, 77, 4, 50, 30)
-	simu.RegisterAgent(station1)
-	simu.RegisterAgent(station2)
+	// Créer les stations (Judith) : une station sur chaque nœud station de la carte
+	for i, node := range carte.Stations() {
+		st := station.NewStation(types.StationID(i+1), node, 4, 50, 30)
+		simu.RegisterAgent(st)
+	}
 
 	// Lancer la simulation
 	ctx, cancel := context.WithCancel(context.Background())
