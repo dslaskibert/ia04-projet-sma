@@ -19,14 +19,14 @@ func TestCar(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
 	// Create 5x5 GridMap with 100m edges and station at node (2,2) -> ID 12
-	GridMap := gridmap.NewGridMap(5, 5, 100.0, [][2]int{{2, 2}})
-	orig, dest := GridMap.RandomOriginDestination(rng)
+	gridMap := gridmap.NewGridMap(5, 5, 100.0, [][2]int{{2, 2}})
+	orig, dest := gridMap.RandomOriginDestination(rng)
 
 	fmt.Printf("[INIT] GridMap created: 5x5 grid (25 nodes, 100m edges)\n")
 	fmt.Printf("[INIT] Charging station configured at node 12 (position (2,2))\n")
 	fmt.Printf("[INIT] RandomOriginDestination called -> Origin Node: %d, Destination Node: %d\n", orig, dest)
 
-	car := NewCar(1, orig, dest, 0.8, 100.0, 0.2, GridMap, rng)
+	car := NewCar(1, orig, dest, 0.8, 100.0, 0.2, gridMap, rng)
 	fmt.Printf("[INIT] Car created -> ID: %d, Origin: %d, Destination: %d, Battery: %.1f%%, Autonomy Range: %.1fm\n",
 		car.ID, car.OriginNode, car.DestNode, car.BatteryLevel*100, car.Range())
 	fmt.Println("--------------------------------------------------------------------------------")
@@ -77,7 +77,7 @@ func TestCar(t *testing.T) {
 
 		// Scenario A: Normal travel with high battery
 		fmt.Println("\n  [SCENARIO A: Normal travel in route with 80% battery]")
-		path, dist, err := GridMap.ShortestPath(car.CurrentNode, car.DestNode)
+		path, dist, err := gridMap.ShortestPath(car.CurrentNode, car.DestNode)
 		fmt.Printf("  -> Dijkstra call: ShortestPath(CurrentNode=%d, DestNode=%d)\n", car.CurrentNode, car.DestNode)
 		fmt.Printf("     Path: %v, Total Distance: %.1fm, Error: %v\n", path, dist, err)
 		fmt.Printf("  -> Car checks battery range: Range(80%%) = %.1fm (Distance needed = %.1fm)\n", car.Range(), dist)
@@ -87,29 +87,30 @@ func TestCar(t *testing.T) {
 			NodePosition: car.CurrentNode,
 			BatteryLevel: 0.8,
 			StationInfos: []StationInfoView{
-				{StationID: 101, NodeID: 12, QueueLength: 1},
+				{StationID: 101, NodeID: 12, QueueLength: 1, Available: true},
 			},
 		}
 		fmt.Printf("  -> Calling car.Decide(perception)...\n")
 		action := car.Decide(percept)
-		fmt.Printf("  -> Decision Result: ActionType = %s, TargetID = %d, State = %s\n", action.Type, action.TargetID, car.State)
-		if action.Type != ActionMove || car.State != StateInRoute {
-			t.Errorf("expected ActionMove in StateInRoute, got action=%s state=%s", action.Type, car.State)
+		fmt.Printf("  -> Decision Result: ActionType = %s, TargetNode = %d, State = %s\n", action.Type, action.TargetNode, car.State)
+		if action.Type != ActionMove || car.State != StateInRoute || action.TargetNode != car.DestNode {
+			t.Errorf("expected ActionMove towards DestNode=%d in StateInRoute, got action=%s target=%d state=%s",
+				car.DestNode, action.Type, action.TargetNode, car.State)
 		}
 
 		// Scenario B: Low battery (< 25%) -> Finds nearest station using Dijkstra
 		fmt.Println("\n  [SCENARIO B: Battery drops to 15% (< 25% threshold) - Rerouting to station]")
 		car.BatteryLevel = 0.15
 		percept.BatteryLevel = 0.15
-		pathSt, distSt, errSt := GridMap.ShortestPath(car.CurrentNode, 12)
+		pathSt, distSt, errSt := gridMap.ShortestPath(car.CurrentNode, 12)
 		fmt.Printf("  -> Dijkstra call: ShortestPath(CurrentNode=%d, StationNode=12)\n", car.CurrentNode)
 		fmt.Printf("     Path to Station: %v, Distance to Station: %.1fm, Error: %v\n", pathSt, distSt, errSt)
 
 		fmt.Printf("  -> Calling car.Decide(perception)...\n")
 		action = car.Decide(percept)
-		fmt.Printf("  -> Decision Result: ActionType = %s, TargetStationID = %d, State = %s\n", action.Type, action.TargetID, car.State)
-		if action.Type != ActionGoToStation || car.State != StateToStation || car.TargetStationID != 101 {
-			t.Errorf("expected ActionGoToStation to station 101, got action=%s target=%d", action.Type, car.TargetStationID)
+		fmt.Printf("  -> Decision Result: ActionType = %s, TargetNode = %d, State = %s\n", action.Type, action.TargetNode, car.State)
+		if action.Type != ActionGoToStation || car.State != StateToStation || action.TargetNode != 12 {
+			t.Errorf("expected ActionGoToStation to station node 12, got action=%s target=%d", action.Type, action.TargetNode)
 		}
 
 		// Scenario C: Arrived at station with queue
@@ -117,9 +118,9 @@ func TestCar(t *testing.T) {
 		car.State = StateAtStation
 		fmt.Printf("  -> Calling car.Decide(perception)...\n")
 		action = car.Decide(percept)
-		fmt.Printf("  -> Decision Result: ActionType = %s, TargetStationID = %d, New State = %s\n", action.Type, action.TargetID, car.State)
-		if action.Type != ActionEnterQueue || car.State != StateInLine {
-			t.Errorf("expected ActionEnterQueue in StateInLine, got action=%s state=%s", action.Type, car.State)
+		fmt.Printf("  -> Decision Result: ActionType = %s, TargetNode = %d, New State = %s\n", action.Type, action.TargetNode, car.State)
+		if action.Type != ActionEnterQueue || car.State != StateInLine || action.TargetNode != 0 {
+			t.Errorf("expected ActionEnterQueue with TargetNode=0 in StateInLine, got action=%s target=%d state=%s", action.Type, action.TargetNode, car.State)
 		}
 
 		// Scenario D: Queue is cleared
@@ -127,9 +128,9 @@ func TestCar(t *testing.T) {
 		percept.StationInfos[0].QueueLength = 0
 		fmt.Printf("  -> Calling car.Decide(perception)...\n")
 		action = car.Decide(percept)
-		fmt.Printf("  -> Decision Result: ActionType = %s, TargetStationID = %d, New State = %s\n", action.Type, action.TargetID, car.State)
-		if action.Type != ActionCharge || car.State != StateCharging {
-			t.Errorf("expected ActionCharge in StateCharging, got action=%s state=%s", action.Type, car.State)
+		fmt.Printf("  -> Decision Result: ActionType = %s, TargetNode = %d, New State = %s\n", action.Type, action.TargetNode, car.State)
+		if action.Type != ActionCharge || car.State != StateCharging || action.TargetNode != 0 {
+			t.Errorf("expected ActionCharge with TargetNode=0 in StateCharging, got action=%s target=%d state=%s", action.Type, action.TargetNode, car.State)
 		}
 
 		// Scenario E: Fully charged (100%)
@@ -138,9 +139,9 @@ func TestCar(t *testing.T) {
 		percept.BatteryLevel = 1.0
 		fmt.Printf("  -> Calling car.Decide(perception)...\n")
 		action = car.Decide(percept)
-		fmt.Printf("  -> Decision Result: ActionType = %s, TargetStationID = %d, New State = %s\n", action.Type, action.TargetID, car.State)
-		if action.Type != ActionStopCharge || car.State != StateInRoute {
-			t.Errorf("expected ActionStopCharge in StateInRoute, got action=%s state=%s", action.Type, car.State)
+		fmt.Printf("  -> Decision Result: ActionType = %s, TargetNode = %d, New State = %s\n", action.Type, action.TargetNode, car.State)
+		if action.Type != ActionStopCharge || car.State != StateInRoute || action.TargetNode != 0 {
+			t.Errorf("expected ActionStopCharge with TargetNode=0 in StateInRoute, got action=%s target=%d state=%s", action.Type, action.TargetNode, car.State)
 		}
 
 		// Scenario F: Destination reached -> draws new destination on the map
@@ -148,12 +149,13 @@ func TestCar(t *testing.T) {
 		previousDest := car.DestNode
 		car.State = StateArrivedDestination
 		fmt.Printf("  -> Previous Destination Node: %d\n", previousDest)
-		fmt.Printf("  -> Calling car.Decide(perception) (which invokes GridMap.RandomOriginDestination)...\n")
+		fmt.Printf("  -> Calling car.Decide(perception) (which invokes gridMap.RandomOriginDestination)...\n")
 		action = car.Decide(percept)
 		fmt.Printf("  -> Decision Result: ActionType = %s, New Destination Node = %d, New State = %s\n",
 			action.Type, car.DestNode, car.State)
-		if action.Type != ActionMove || car.State != StateInRoute {
-			t.Errorf("expected ActionMove in StateInRoute, got action=%s state=%s", action.Type, car.State)
+		if action.Type != ActionMove || car.State != StateInRoute || action.TargetNode != car.DestNode {
+			t.Errorf("expected ActionMove towards new DestNode=%d in StateInRoute, got action=%s target=%d state=%s",
+				car.DestNode, action.Type, action.TargetNode, car.State)
 		}
 		fmt.Println("--------------------------------------------------------------------------------")
 	})
