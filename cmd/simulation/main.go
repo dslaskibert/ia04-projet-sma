@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
+	"github.com/dslaskibert/ia04-projet-sma/agent/car"
 	"github.com/dslaskibert/ia04-projet-sma/agent/station"
 	"github.com/dslaskibert/ia04-projet-sma/environment/gridmap"
 	"github.com/dslaskibert/ia04-projet-sma/simulation"
@@ -21,9 +23,14 @@ func main() {
 	// Créer simulation
 	simu := simulation.NewSimu()
 
+	orig, dest := carte.RandomOriginDestination(rand.New(rand.NewSource(1)))
+	
 	// Créer agents
 	agtTest := agent.NewAgentTest("test", types.AgentTypeTest)
 	simu.RegisterAgent(agtTest)
+	
+	car := car.NewCar(1, orig, dest, 0.8, 100, 0.2, carte, rand.New(rand.NewSource(1)))
+	simu.RegisterAgent(car)
 
 	// Créer les stations (Judith) : une station sur chaque nœud station de la carte
 	for i, node := range carte.Stations() {
@@ -35,4 +42,5 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	simu.Run(ctx, 10)
+
 }
