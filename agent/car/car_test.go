@@ -188,7 +188,43 @@ func TestCar(t *testing.T) {
 			t.Errorf("expected TargetStationID %d, got %d", snap.TargetStationID, car.targetStationID)
 		}
 		fmt.Printf("	-> Result: PASS\n")
-		}) 
+	})
+
+	// Subtest 5: Step Movement & Battery Consumption
+	t.Run("Step_Movement_And_Battery", func(t *testing.T) {
+		fmt.Printf("\n[SUBTEST 5: STEP MOVEMENT & BATTERY CONSUMPTION]\n")
+		// Configure a test car with known start node 0 and destination 2
+		testCar := NewCar(99, 0, 2, 1.0, 100.0, 0.2, gridMap, rng)
+
+		initialBattery := testCar.batteryLevel
+		initialNode := testCar.currentNode
+		fmt.Printf("  -> Initial State: Node=%d, Battery=%.1f%%\n", initialNode, initialBattery*100)
+
+		// Tick 1: Car should plan path [0, 1, 2] and move to node 1
+		action1 := testCar.Step(1)
+		fmt.Printf("  -> Step 1 Result: Action=%s, New Node=%d, Battery=%.1f%%\n", action1.Type, testCar.currentNode, testCar.batteryLevel*100)
+
+		if testCar.currentNode != 1 {
+			t.Errorf("expected currentNode = 1 after step 1, got %d", testCar.currentNode)
+		}
+		if testCar.batteryLevel >= initialBattery {
+			t.Errorf("expected battery to decrease after movement, got %f", testCar.batteryLevel)
+		}
+
+		// Tick 2: Car should move from node 1 to node 2 (destination reached)
+		action2 := testCar.Step(2)
+		fmt.Printf("  -> Step 2 Result: Action=%s, New Node=%d, Battery=%.1f%%, State=%s\n",
+			action2.Type, testCar.currentNode, testCar.batteryLevel*100, testCar.state)
+
+		if testCar.currentNode != 2 {
+			t.Errorf("expected currentNode = 2 after step 2, got %d", testCar.currentNode)
+		}
+		if testCar.state != StateArrivedDestination {
+			t.Errorf("expected StateArrivedDestination upon reaching node 2, got %s", testCar.state)
+		}
+
+		fmt.Printf("  -> Result: PASS (Movement along path and battery consumption verified)\n")
+	}) 
 
 	})
 	fmt.Println("================================================================================")

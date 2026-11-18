@@ -327,13 +327,24 @@ func (m *GridMap) AllEdges() []environment.Edge {
 }
 
 func (m *GridMap) Print() {
+	m.PrintWithPositions(nil)
+}
+
+// PrintWithPositions affiche la carte avec les positions des voitures
+func (m *GridMap) PrintWithPositions(carPositions map[types.NodeID]string) {
 	for y := 0; y < m.height; y++ {
 
 		// afficher les noeuds
 		for x := 0; x < m.width; x++ {
 			node := m.nodes[y*m.width+x]
 
-			if node.isStation {
+			if carLabel, hasCar := carPositions[node.id]; hasCar {
+				if node.isStation {
+					fmt.Printf("*%s*", carLabel)
+				} else {
+					fmt.Printf(" %s ", carLabel)
+				}
+			} else if node.isStation {
 				fmt.Print("  *  ")
 			} else {
 				fmt.Print("  o  ")
