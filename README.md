@@ -21,10 +21,35 @@ environment/ graphes et cartes
 simulation/ moteur de simulation
 types/ types partagés entre packages
 cmd/simulation/ fichier main
+frontend/ interface web React
+backend/ API HTTP Go
 ```
 
 ## Lancement du projet
 
+### Simulation
+
 ```
 go run cmd/simulation/main.go
 ```
+
+### Backend
+
+```sh
+cd backend
+go run .
+```
+
+Le serveur écoute par défaut sur `http://localhost:8080`. La variable
+d'environnement `PORT` permet de modifier le port.
+
+### Frontend
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+En développement, Vite transmet les requêtes `/api` au backend sur le port
+`8080`.
