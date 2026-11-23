@@ -23,7 +23,8 @@ func (s *Station) Type() types.AgentType {
 }
 
 // Start : la "vie" de la station. Elle tourne dans sa propre goroutine.
-// À chaque tour : elle reçoit le numéro du tour, l'affiche,
+// C'est la seule goroutine qui modifie la station, donc pas besoin de mutex.
+// À chaque tour : elle lit les nouveaux messages, recharge pendant 1 minute,
 // puis prévient le moteur qu'elle a fini.
 func (s *Station) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut chan<- struct{}) {
 	for {
@@ -31,8 +32,14 @@ func (s *Station) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOu
 		case <-ctx.Done(): // la simulation est finie : on s'arrête
 			return
 		case now := <-tickIn: // un nouveau tour commence
-			fmt.Printf("[%s] tour %d reçu\n", s.Name(), now)
-			// plus tard (jalon 2) : s.step(now) pour recharger les voitures
+			s.receiveMessages(now)
+			finished := s.step(now)
+			for _, d := range finished {
+				fmt.Printf("[%s] tour %d : voiture %d rechargée (%.1f kWh, %.0f centimes)\n",
+					s.Name(), now, d.CarID, d.EnergyGiven, float64(d.Cost))
+			}
+			fmt.Printf("[%s] tour %d : %d/%d bornes libres, %d en file\n",
+				s.Name(), now, s.freePumps(), len(s.pumps), len(s.queue))
 			doneOut <- struct{}{} // "j'ai fini mon tour"
 		}
 	}
