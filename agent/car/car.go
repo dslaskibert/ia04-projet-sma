@@ -132,11 +132,6 @@ func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut ch
 			fmt.Printf("[%s] tick %d received (pos: %d, dest: %d, state: %s, battery: %.1f%%, action: %s)\n",
 				c.Name(), now, c.currentNode, c.destNode, c.state, c.batteryLevel*100, action.Type)
 
-			// Afficher la position visuelle sur la grille si disponible
-			if gm, ok := c.Map.(interface{ PrintWithPositions(map[types.NodeID]string) }); ok {
-				gm.PrintWithPositions(map[types.NodeID]string{c.currentNode: fmt.Sprintf("C%d", c.id)})
-			}
-
 			doneOut <- struct{}{}
 		}
 	}
@@ -166,8 +161,16 @@ func (c *Car) moveNextNode() {
 	}
 
 	nextNode := c.path[1]
-	_, dist, err := c.Map.ShortestPath(c.currentNode, nextNode)
-	if err != nil {
+	var dist float64
+	var edgeFound bool
+	for _, edge := range c.Map.Edges(c.currentNode) {
+		if edge.To() == nextNode {
+			dist = edge.Length()
+			edgeFound = true
+			break
+		}
+	}
+	if !edgeFound {
 		return
 	}
 
@@ -341,6 +344,7 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 	case StateCharging:
 		c.batteryLevel += 0.20 // just testing, this will be removed after
 		if c.batteryLevel >= 1.0 {
+			c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
 			c.state = StateInRoute
 			return CarAction{
 				CarID:      c.id,
