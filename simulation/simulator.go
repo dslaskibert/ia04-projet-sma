@@ -3,6 +3,7 @@ package simulation
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
 	"github.com/dslaskibert/ia04-projet-sma/types"
@@ -46,10 +47,17 @@ func (simu *Simu) RegisterAgent(a agent.Agent) {
 	simu.agents = append(simu.agents, newAgent)
 
 	// Indexation dans le registre par type assertion
+	// Panic volontaire sur ID dupliqué
 	if sh, ok := a.(types.StationHandle); ok {
+		if _, exists := simu.stationByID[sh.ID()]; exists {
+			panic(fmt.Sprintf("RegisterAgent: station ID %d déjà enregistrée", sh.ID()))
+		}
 		simu.stationByID[sh.ID()] = sh
 	}
 	if ch, ok := a.(types.CarHandle); ok {
+		if _, exists := simu.carByID[ch.ID()]; exists {
+			panic(fmt.Sprintf("RegisterAgent: voiture ID %d déjà enregistrée", ch.ID()))
+		}
 		simu.carByID[ch.ID()] = ch
 	}
 }
@@ -64,6 +72,8 @@ func (simu *Simu) AllStations() []types.StationHandle {
 	for _, s := range simu.stationByID {
 		out = append(out, s)
 	}
+	// Tri par ID pour garantir la reproductibilité car les map Go sont non déterministes
+	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
 	return out
 }
 

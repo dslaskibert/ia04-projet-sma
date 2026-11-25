@@ -11,7 +11,9 @@ type StationMessage interface {
 type ArriveMessage struct {
 	CarID     types.CarID
 	NeededKWh float64           // quantité d'énergie demandée
-	ReplyChan chan StationReply // channel sur lequel la station répond
+	ReplyChan chan StationReply // channel sur lequel la station répond (QueuePositionMessage, ChargeFinishedMessage, ..)
+	// la voiture doit créer ce channel bufferisé (buffer >= 2),
+	// sinon la station bloquerait au moment d'écrire la réponse et figerait toute la simulation
 }
 
 func (m ArriveMessage) SenderID() types.CarID {
@@ -27,7 +29,18 @@ func (m LeaveQueueMessage) SenderID() types.CarID {
 	return m.CarID
 }
 
+// voiture qui demande à interrompre une recharge en cours
+type StopChargeMessage struct {
+	CarID types.CarID
+}
+
+func (m StopChargeMessage) SenderID() types.CarID {
+	return m.CarID
+}
+
 // station informe une voiture de sa position dans la file + estimation d'attente
+// Convention : Position à 0 signifie que la voiture est branchée et en cours de recharge (elle n'attend plus)
+// EstimatedWaitTicks vaut alors 0
 type QueuePositionMessage struct {
 	CarID              types.CarID
 	Position           int
@@ -40,10 +53,8 @@ func (m QueuePositionMessage) SenderID() types.CarID { return m.CarID }
 type ChargeFinishedMessage struct {
 	CarID       types.CarID
 	EnergyGiven float64
-	Cost        types.Price
+	Cost        types.Cost
 }
-
-func (m ChargeFinishedMessage) SenderID() types.CarID { return m.CarID }
 
 // interface commune aux réponses envoyées par une station
 type StationReply interface {
