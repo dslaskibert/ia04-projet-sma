@@ -277,8 +277,9 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			if info.StationID == c.targetStationID {
 				stationNode = info.NodeID
 				break
-			}
-		}
+if c.batteryLevel >= 1.0 {
+c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
+c.state = StateInRoute
 
 		if c.currentNode == stationNode {
 			c.state = StateAtStation
