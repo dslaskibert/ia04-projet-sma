@@ -35,7 +35,7 @@ func (s *Station) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOu
 			s.receiveMessages(now)
 			finished := s.step(now)
 			for _, d := range finished {
-				fmt.Printf("[%s] tour %d : voiture %d rechargée (%.1f kWh, %.0f centimes)\n",
+				fmt.Printf("[%s] tour %d : voiture %d rechargée (%.1f kWh, %.2f €)\n",
 					s.Name(), now, d.CarID, d.EnergyGiven, float64(d.Cost))
 			}
 			fmt.Printf("[%s] tour %d : %d/%d bornes libres, %d en file\n",

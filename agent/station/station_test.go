@@ -40,6 +40,7 @@ func presque(a, b float64) bool {
 }
 
 // Une voiture qui demande 30 kWh sur une borne de 50 kW doit mettre 36 minutes
+// et payer 30 kWh x 30 centimes = 900 centimes = 9 €
 func TestRecharge(t *testing.T) {
 	s := NewStation(1, 0, 1, 50, 30)
 	reply := make(chan messages.StationReply, 1)
@@ -57,7 +58,7 @@ func TestRecharge(t *testing.T) {
 				}
 			case messages.ChargeFinishedMessage:
 				fin = tick
-				if !presque(m.EnergyGiven, 30) || !presque(float64(m.Cost), 900) {
+				if !presque(m.EnergyGiven, 30) || !presque(float64(m.Cost), 9) {
 					t.Errorf("mauvais bilan : %+v", m)
 				}
 			}
@@ -66,18 +67,19 @@ func TestRecharge(t *testing.T) {
 	if fin != 36 {
 		t.Errorf("recharge finie au tour %d, attendu 36", fin)
 	}
-	if !presque(s.Snapshot().Revenue, 900) {
-		t.Errorf("revenu = %.2f, attendu 900", s.Snapshot().Revenue)
+	if !presque(float64(s.Snapshot().Revenue), 9) {
+		t.Errorf("revenu = %.2f €, attendu 9 €", float64(s.Snapshot().Revenue))
 	}
 	if s.Snapshot().FreePumps != 1 {
 		t.Errorf("la borne devrait être libre après la recharge")
 	}
 }
 
-// Avec une seule borne, la 2e voiture attend dans la file puis passe après la 1re
+// Avec une seule borne, la 2e voiture attend dans la file puis passe après la 1re.
+// Quand elle est branchée, la station la prévient (position 0).
 func TestFileAttente(t *testing.T) {
 	s := NewStation(1, 0, 1, 50, 30)
-	r2 := make(chan messages.StationReply, 1)
+	r2 := make(chan messages.StationReply, 2)
 	s.Inbox() <- arrivee(1, 30, nil)
 	s.Inbox() <- arrivee(2, 30, r2)
 
@@ -95,10 +97,19 @@ func TestFileAttente(t *testing.T) {
 	}
 
 	finVoiture := map[types.CarID]int{}
+	branchee := 0 // tour où la voiture 2 apprend qu'elle est branchée
 	for tick := 2; tick <= 100; tick++ {
 		for _, d := range tour(s, types.SimTime(tick)) {
 			finVoiture[d.CarID] = tick
 		}
+		for _, r := range reponses(r2) {
+			if m, ok := r.(messages.QueuePositionMessage); ok && m.Position == 0 {
+				branchee = tick
+			}
+		}
+	}
+	if branchee != 36 {
+		t.Errorf("voiture 2 prévenue au tour %d, attendu 36 (quand la voiture 1 libère la borne)", branchee)
 	}
 	if finVoiture[1] != 36 || finVoiture[2] != 72 {
 		t.Errorf("fins = %v, attendu voiture 1 au tour 36 et voiture 2 au tour 72", finVoiture)
@@ -108,10 +119,10 @@ func TestFileAttente(t *testing.T) {
 	}
 }
 
-// Une voiture qui quitte la file laisse sa place à la suivante
+// Une voiture qui quitte la file laisse sa place à la suivante, qui est prévenue
 func TestQuitterFile(t *testing.T) {
 	s := NewStation(1, 0, 1, 50, 30)
-	r3 := make(chan messages.StationReply, 1)
+	r3 := make(chan messages.StationReply, 2)
 	s.Inbox() <- arrivee(1, 30, nil)
 	s.Inbox() <- arrivee(2, 30, nil)
 	s.Inbox() <- arrivee(3, 30, r3)
@@ -127,6 +138,15 @@ func TestQuitterFile(t *testing.T) {
 	if s.Snapshot().QueueLength != 1 {
 		t.Errorf("file = %d, attendu 1 après le départ de la voiture 2", s.Snapshot().QueueLength)
 	}
+	// la voiture 3 passe 1re : la station lui envoie sa nouvelle position.
+	// La voiture 1 a déjà chargé 2 minutes sur 36, il lui en reste 34.
+	rep := reponses(r3)
+	if len(rep) != 1 {
+		t.Fatalf("la voiture 3 devrait recevoir 1 message, reçu %d", len(rep))
+	}
+	if m, ok := rep[0].(messages.QueuePositionMessage); !ok || m.Position != 1 || m.EstimatedWaitTicks != 34 {
+		t.Errorf("réponse = %+v, attendu position 1 et 34 tours d'attente", rep[0])
+	}
 
 	finVoiture := map[types.CarID]int{}
 	for tick := 3; tick <= 100; tick++ {
@@ -136,6 +156,76 @@ func TestQuitterFile(t *testing.T) {
 	}
 	if finVoiture[3] != 72 || finVoiture[2] != 0 {
 		t.Errorf("fins = %v, attendu voiture 3 au tour 72 et rien pour la voiture 2", finVoiture)
+	}
+}
+
+// Une voiture peut partir avant d'avoir fini : elle reçoit le bilan de ce qu'elle a eu,
+// la borne se libère et la voiture suivante est branchée (et prévenue) au même tour
+func TestArreterRecharge(t *testing.T) {
+	s := NewStation(1, 0, 1, 50, 30)
+	r1 := make(chan messages.StationReply, 2)
+	r2 := make(chan messages.StationReply, 2)
+	s.Inbox() <- arrivee(1, 30, r1)
+	s.Inbox() <- arrivee(2, 30, r2)
+	for tick := 1; tick <= 12; tick++ {
+		tour(s, types.SimTime(tick))
+	}
+	reponses(r1) // on vide les positions reçues au tour 1
+	reponses(r2)
+
+	// en 12 minutes à 50 kW, la voiture 1 a eu 10 kWh (3 €) : elle s'en va
+	s.Inbox() <- messages.StopChargeMessage{CarID: 1}
+	tour(s, 13)
+
+	rep := reponses(r1)
+	if len(rep) != 1 {
+		t.Fatalf("la voiture 1 devrait recevoir son bilan, reçu %d messages", len(rep))
+	}
+	if m, ok := rep[0].(messages.ChargeFinishedMessage); !ok || !presque(m.EnergyGiven, 10) || !presque(float64(m.Cost), 3) {
+		t.Errorf("bilan = %+v, attendu 10 kWh et 3 €", rep[0])
+	}
+	rep = reponses(r2)
+	if len(rep) != 1 {
+		t.Fatalf("la voiture 2 devrait être prévenue qu'elle est branchée, reçu %d messages", len(rep))
+	}
+	if m, ok := rep[0].(messages.QueuePositionMessage); !ok || m.Position != 0 {
+		t.Errorf("voiture 2 : %+v, attendu position 0 (branchée)", rep[0])
+	}
+	if !presque(float64(s.Snapshot().Revenue), 3) {
+		t.Errorf("revenu = %.2f €, attendu 3 €", float64(s.Snapshot().Revenue))
+	}
+}
+
+// Si la voiture est encore dans la file, arrêter sa recharge = quitter la file
+func TestArreterDansLaFile(t *testing.T) {
+	s := NewStation(1, 0, 1, 50, 30)
+	s.Inbox() <- arrivee(1, 30, nil)
+	s.Inbox() <- arrivee(2, 30, nil)
+	tour(s, 1)
+
+	s.Inbox() <- messages.StopChargeMessage{CarID: 2}
+	tour(s, 2)
+	if v := s.Snapshot(); v.QueueLength != 0 || v.FreePumps != 0 {
+		t.Errorf("file = %d, bornes libres = %d, attendu 0 et 0 (voiture 2 partie, voiture 1 toujours branchée)", v.QueueLength, v.FreePumps)
+	}
+}
+
+// Une borne libérée par un départ revient à la 1re voiture de la file,
+// pas à une voiture qui arrive au même tour
+func TestPasDeResquille(t *testing.T) {
+	s := NewStation(1, 0, 1, 50, 30)
+	s.Inbox() <- arrivee(1, 30, nil)
+	s.Inbox() <- arrivee(2, 30, nil)
+	tour(s, 1)
+
+	s.Inbox() <- messages.StopChargeMessage{CarID: 1}
+	s.Inbox() <- arrivee(3, 30, nil)
+	tour(s, 2)
+	if s.pumps[0].Car == nil || s.pumps[0].Car.carID != 2 {
+		t.Errorf("la borne devrait être à la voiture 2 (1re de la file)")
+	}
+	if len(s.queue) != 1 || s.queue[0].carID != 3 {
+		t.Errorf("la voiture 3 devrait attendre derrière")
 	}
 }
 
