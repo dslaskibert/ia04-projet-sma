@@ -1,18 +1,17 @@
 package car
 
 import (
-	"context"
-	"fmt"
 	"math/rand"
-
-	"github.com/dslaskibert/ia04-projet-sma/agent"
+	
 	"github.com/dslaskibert/ia04-projet-sma/environment"
 	"github.com/dslaskibert/ia04-projet-sma/messages"
 	"github.com/dslaskibert/ia04-projet-sma/types"
+	"github.com/dslaskibert/ia04-projet-sma/agent/station"
 )
 
-var _ agent.Agent = (*Car)(nil)
 
+// what the car can do in the turn
+type ActionType string
 type CarState string
 
 const (
@@ -40,16 +39,13 @@ type StationInfoView struct {
 	Available   bool
 }
 
-// what the car can do in the turn
-type ActionType string
-
 const (
-	ActionMove        ActionType = "MOVE"
-	ActionGoToStation ActionType = "GO_TO_STATION"
-	ActionEnterQueue  ActionType = "ENTER_QUEUE"
-	ActionLeaveQueue  ActionType = "LEAVE_QUEUE"
-	ActionCharge      ActionType = "CHARGE"
-	ActionStopCharge  ActionType = "STOP_CHARGE"
+	ActionMove        		ActionType = "MOVE"
+	ActionGoToStation 		ActionType = "GO_TO_STATION"
+	ActionEnterQueue  		ActionType = "ENTER_QUEUE"
+	ActionLeaveQueue  		ActionType = "LEAVE_QUEUE"
+	ActionCharge      		ActionType = "CHARGE"
+	ActionStopCharge  		ActionType = "STOP_CHARGE"
 )
 
 // what will be send to the environment
@@ -73,11 +69,13 @@ type Car struct {
 	state           	CarState
 	targetStationID 	types.StationID
 
-	travelTimeMin   int     // minutes runing
-	waitingTimeMin  int     // minutes in the line
-	chargingTimeMin int     // minutes charging
-	distanceKm      float64 // total range in km
-	stationChanges  int     // changes of target stations
+	strategy			CarStrategy 
+
+	travelTimeMin   	int     // minutes runing
+	waitingTimeMin  	int     // minutes in the line
+	chargingTimeMin 	int     // minutes charging
+	distanceKm      	float64 // total range in km
+	stationChanges  	int     // changes of target stations
 
 	Map 				environment.Map
 	Rng 				*rand.Rand
@@ -93,6 +91,7 @@ type CarView struct {
 	MaxBattery      float64
 	State           CarState
 	TargetStationID types.StationID
+	Strategy        string
 
 	TravelTimeMin   int
 	WaitingTimeMin  int
@@ -110,20 +109,13 @@ func (c *Car) Snapshot() CarView {
 		MaxBattery:      c.maxBattery,
 		State:           c.state,
 		TargetStationID: c.targetStationID,
+		Strategy:        string(c.strategy),
 		TravelTimeMin:   c.travelTimeMin,
 		WaitingTimeMin:  c.waitingTimeMin,
 		ChargingTimeMin: c.chargingTimeMin,
 		DistanceKm:      c.distanceKm,
 		StationChanges:  c.stationChanges,
 	}
-}
-
-func (c *Car) ID() types.CarID {
-	return c.id
-}
-
-func (c *Car) Position() types.NodeID {
-	return c.currentNode
 }
 
 func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consumption float64, envMap environment.Map, rng *rand.Rand) *Car {
@@ -136,36 +128,10 @@ func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consum
 		maxBattery:   maxBattery,
 		consumption:  consumption,
 		state:        StateInRoute,
+		strategy:     StrategyNearest,
 		Map:          envMap,
 		Rng:          rng,
 		replyChan: 	  make(chan messages.StationReply, 10),
-	}
-}
-
-func (c *Car) SetRegistry(reg types.Registry) {
-	c.registry = reg
-}
-
-func (c *Car) Name() string {
-	return fmt.Sprintf("car-%d", c.id)
-}
-
-func (c *Car) Type() types.AgentType {
-	return types.AgentTypeCar
-}
-
-func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut chan<- struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-tickIn:
-			action := c.Step(now)
-			fmt.Printf("[%s] tick %d received (pos: %d, dest: %d, state: %s, battery: %.1f%%, action: %s)\n",
-				c.Name(), now, c.currentNode, c.destNode, c.state, c.batteryLevel*100, action.Type)
-
-			doneOut <- struct{}{}
-		}
 	}
 }
 
@@ -254,12 +220,28 @@ func (c *Car) perceiveStations() []StationInfoView {
 	views := make([]StationInfoView, 0, len(stationNodes))
 
 	for idx, nodeID := range stationNodes {
+		stID := types.StationID(idx + 1)
+		queueLen := 0
+		var price types.Price = 0
+		available := true
+
+		if c.registry != nil {
+			if handle := c.registry.StationByID(stID); handle != nil {
+				if snapProvider, ok := handle.(interface{ Snapshot() station.StationView }); ok {
+					snap := snapProvider.Snapshot()
+					queueLen = snap.QueueLength
+					price = snap.Price
+					available = snap.FreePumps > 0 || snap.QueueLength < 10
+				}
+			}
+		}
+
 		views = append(views, StationInfoView{
-			StationID:   types.StationID(idx + 1),
+			StationID:   stID,
 			NodeID:      nodeID,
-			QueueLength: 0,
-			Price:       0,
-			Available:   true,
+			QueueLength: queueLen,
+			Price:       price,
+			Available:   available,
 		})
 	}
 
@@ -283,7 +265,6 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			break
 		}
 	}
-
 	switch c.state {
 	case StateInRoute:
 		if c.currentNode == c.destNode {
@@ -297,25 +278,10 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 		}
 		_, distDest, _ := c.Map.ShortestPath(c.currentNode, c.destNode)
 		if c.batteryLevel < 0.25 || distDest > c.Range() {
-			var bestStation types.StationID
-			var bestStationNode types.NodeID
-			var bestPath []types.NodeID
-			var minDist float64 = -1
-			
-			for _, info := range percept.StationInfos {
-				pathSt, dist, err := c.Map.ShortestPath(c.currentNode, info.NodeID)
-				if err == nil && (minDist < 0 || dist < minDist) {
-					minDist = dist
-					bestStation = info.StationID
-					bestStationNode = info.NodeID
-					bestPath = pathSt
-				}
-			}
-
+			bestStation, bestStationNode, bestPath := c.chooseStation(percept.StationInfos)
 			if c.targetStationID != 0 && c.targetStationID != bestStation {
 				c.stationChanges++
 			}
-
 			c.targetStationID = bestStation
 			c.state = StateToStation
 			c.path = bestPath
@@ -325,11 +291,9 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 				TargetNode: bestStationNode,
 			}
 		}
-
 		if len(c.path) < 2 {
 			c.path, _, _ = c.Map.ShortestPath(c.currentNode, c.destNode)
 		}
-
 		return CarAction{
 			CarID:      c.id,
 			Type:       ActionMove,
