@@ -2,18 +2,18 @@
 # Garder cette config courte et déterministe (seed fixe)
 
 seed: 42
-max_ticks: 100
+max_ticks: 50
 
 map:
   type: grid
   width: 10
-  height: 10
+  height: 5
 
 cars:
-  count: 5
+  count: 3
   initial_battery: 0.8   # 80% de batterie au départ
   max_battery: 100       # capacité max en kWh
-  consumption: 0.2       # kWh par unité de distance
+  consumption: 0.02       # kWh par unité de distance
 
 stations:
-  pumps_per_station: 2
+  pumps_per_station: 4
