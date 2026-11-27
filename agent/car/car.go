@@ -63,6 +63,7 @@ type Car struct {
 	originNode  types.NodeID
 	destNode    types.NodeID
 	currentNode types.NodeID
+	path		[]types.NodeID
 
 	batteryLevel float64
 	maxBattery   float64
@@ -128,8 +129,9 @@ func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut ch
 			return
 		case now := <-tickIn:
 			action := c.Step(now)
-			fmt.Printf("[%s] tick %d received (state: %s, battery: %.1f%%, action: %s)\n",
-				c.Name(), now, c.state, c.batteryLevel*100, action.Type)
+			fmt.Printf("[%s] tick %d received (pos: %d, dest: %d, state: %s, battery: %.1f%%, action: %s)\n",
+				c.Name(), now, c.currentNode, c.destNode, c.state, c.batteryLevel*100, action.Type)
+
 			doneOut <- struct{}{}
 		}
 	}
@@ -144,7 +146,49 @@ func (c *Car) Step(now types.SimTime) CarAction {
 		StationInfos: c.perceiveStations(),
 	}
 
-	return c.Decide(percept)
+	action := c.Decide(percept)
+
+	if action.Type == ActionMove || action.Type == ActionGoToStation {
+		c.moveNextNode()
+	}
+
+	return action
+}
+
+func (c *Car) moveNextNode() {
+	if c.Map == nil || len(c.path) < 2 {
+		return
+	}
+
+	nextNode := c.path[1]
+	var dist float64
+	var edgeFound bool
+	for _, edge := range c.Map.Edges(c.currentNode) {
+		if edge.To() == nextNode {
+			dist = edge.Length()
+			edgeFound = true
+			break
+		}
+	}
+	if !edgeFound {
+		return
+	}
+
+	c.currentNode = nextNode
+	c.path = c.path[1:]
+
+	c.batteryLevel -= (dist * c.consumption) / c.maxBattery
+	if c.batteryLevel <= 0 {
+		c.batteryLevel = 0
+		c.state = StateBrokenDown
+		return
+	}
+
+	// Check arrival at destination
+	if c.state == StateInRoute && c.currentNode == c.destNode {
+		c.state = StateArrivedDestination
+		c.path = nil
+	}
 }
 
 // perceiveStations inspects map stations to build the perception
@@ -193,25 +237,33 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 		if c.batteryLevel < 0.25 || distDest > c.Range() {
 			var bestStation types.StationID
 			var bestStationNode types.NodeID
+			var bestPath []types.NodeID
 			var minDist float64 = -1
 
 			for _, info := range percept.StationInfos {
-				_, dist, err := c.Map.ShortestPath(c.currentNode, info.NodeID)
+				pathSt, dist, err := c.Map.ShortestPath(c.currentNode, info.NodeID)
 				if err == nil && (minDist < 0 || dist < minDist) {
 					minDist = dist
 					bestStation = info.StationID
 					bestStationNode = info.NodeID
+					bestPath = pathSt
 				}
 			}
 
 			c.targetStationID = bestStation
 			c.state = StateToStation
+			c.path = bestPath
 			return CarAction{
 				CarID:      c.id,
 				Type:       ActionGoToStation,
 				TargetNode: bestStationNode,
 			}
 		}
+
+		if len(c.path) < 2 {
+			c.path, _, _ = c.Map.ShortestPath(c.currentNode, c.destNode)
+		}
+
 		return CarAction{
 			CarID:      c.id,
 			Type:       ActionMove,
@@ -225,8 +277,24 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			if info.StationID == c.targetStationID {
 				stationNode = info.NodeID
 				break
+if c.batteryLevel >= 1.0 {
+c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
+c.state = StateInRoute
+
+		if c.currentNode == stationNode {
+			c.state = StateAtStation
+			c.path = nil
+			return CarAction{
+				CarID:      c.id,
+				Type:       ActionType("NONE"),
+				TargetNode: stationNode,
 			}
 		}
+
+		if len(c.path) < 2 {
+			c.path, _, _ = c.Map.ShortestPath(c.currentNode, stationNode)
+		}
+
 		return CarAction{
 			CarID:      c.id,
 			Type:       ActionGoToStation,
@@ -236,6 +304,7 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 	case StateArrivedDestination:
 		_, c.destNode = c.Map.RandomOriginDestination(c.Rng)
 		c.state = StateInRoute
+		c.path, _, _ = c.Map.ShortestPath(c.currentNode, c.destNode)
 		return CarAction{
 			CarID:      c.id,
 			Type:       ActionMove,
@@ -274,7 +343,9 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 		}
 
 	case StateCharging:
+		c.batteryLevel += 0.20 // just testing, this will be removed after
 		if c.batteryLevel >= 1.0 {
+			c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
 			c.state = StateInRoute
 			return CarAction{
 				CarID:      c.id,
