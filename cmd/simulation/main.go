@@ -3,49 +3,73 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
-	"time"
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
 	"github.com/dslaskibert/ia04-projet-sma/agent/car"
 	"github.com/dslaskibert/ia04-projet-sma/agent/station"
+	"github.com/dslaskibert/ia04-projet-sma/config"
 	"github.com/dslaskibert/ia04-projet-sma/environment/gridmap"
 	"github.com/dslaskibert/ia04-projet-sma/simulation"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
 
 func main() {
-	fmt.Println("Hello World")
+	// Chargement de la config
+	cfg, err := config.Load("configs/minimal.yaml")
+	if err != nil {
+		log.Fatalf("Chargement config: %v", err)
+	}
+	fmt.Printf("Config chargée: %+v\n", cfg)
 
-	// Créer carte
-	carte := gridmap.NewGridMap(10, 5, 100.0, [][2]int{{3, 3}, {7, 7}})
+	// RNG principal seedé (reproductibilité)
+	rng := rand.New(rand.NewSource(cfg.Seed))
+
+	// Carte
+	// TODO: passer stationPositions dans la config
+	stationPositions := [][2]int{{3, 2}, {7, 3}}
+	carte := gridmap.NewGridMap(cfg.Map.Width, cfg.Map.Height, 100.0, stationPositions)
 	carte.Print()
 
-	// Créer simulation
+	// Simulation
 	simu := simulation.NewSimu()
 
-	//orig, dest := carte.RandomOriginDestination(rand.New(rand.NewSource(1)))
-	
-	// Créer agents
+	// Agent de test
 	agtTest := agent.NewAgentTest("test", types.AgentTypeTest)
 	simu.RegisterAgent(agtTest)
-	
-	for i := 1; i <= 2; i++ {
-		rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(i*1000)))
+
+	// Voitures : chacune a son propre RNG, seedé depuis le RNG principal
+	for i := 1; i <= cfg.Cars.Count; i++ {
 		orig, dest := carte.RandomOriginDestination(rng)
-		car := car.NewCar(types.CarID(i), orig, dest, 0.8, 1000, 0.2, carte, rng) // just testing with 1000%
-		simu.RegisterAgent(car)
+		carRng := rand.New(rand.NewSource(rng.Int63()))
+		c := car.NewCar(
+			types.CarID(i),
+			orig, dest,
+			cfg.Cars.InitialBattery,
+			cfg.Cars.MaxBattery,
+			cfg.Cars.Consumption,
+			carte,
+			carRng,
+		)
+		simu.RegisterAgent(c)
 	}
 
-	// Créer les stations (Judith) : une station sur chaque nœud station de la carte
+	// Stations
+	// TODO: ajouter pump_power_kw et price_centimes_per_kwh dans la config
 	for i, node := range carte.Stations() {
-		st := station.NewStation(types.StationID(i+1), node, 4, 50, 30)
+		st := station.NewStation(
+			types.StationID(i+1),
+			node,
+			cfg.Stations.PumpsPerStation,
+			50,
+			30,
+		)
 		simu.RegisterAgent(st)
 	}
 
-	// Lancer la simulation
+	// Lancement
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	simu.Run(ctx, 20)
-
+	simu.Run(ctx, cfg.MaxTicks)
 }
