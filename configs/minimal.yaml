@@ -8,12 +8,19 @@ map:
   type: grid
   width: 10
   height: 5
+  node_spacing_m: 100.0
+  station_positions:
+    - [3, 2]
+    - [7, 3]
 
 cars:
   count: 3
   initial_battery: 0.8   # 80% de batterie au départ
-  max_battery: 100       # capacité max en kWh
-  consumption: 0.02       # kWh par unité de distance
+  max_battery_kwh: 100       # capacité max en kWh
+  consumption_kwh_per_km: 0.002       # kWh par unité de distance
+  battery_threshold: 0.25    # seuil en dessous duquel on cherche une station
 
 stations:
   pumps_per_station: 4
+  pump_power_kw: 50 # puissance nominale d'une borne
+  price_euros_per_kwh: 0.30 # prix facturé
