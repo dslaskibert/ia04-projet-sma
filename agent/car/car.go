@@ -73,6 +73,12 @@ type Car struct {
 	state           	CarState
 	targetStationID 	types.StationID
 
+	travelTimeMin   int     // minutes runing
+	waitingTimeMin  int     // minutes in the line
+	chargingTimeMin int     // minutes charging
+	distanceKm      float64 // total range in km
+	stationChanges  int     // changes of target stations
+
 	Map 				environment.Map
 	Rng 				*rand.Rand
 	registry 			types.Registry
@@ -87,6 +93,12 @@ type CarView struct {
 	MaxBattery      float64
 	State           CarState
 	TargetStationID types.StationID
+
+	TravelTimeMin   int
+	WaitingTimeMin  int
+	ChargingTimeMin int
+	DistanceKm      float64
+	StationChanges  int
 }
 
 func (c *Car) Snapshot() CarView {
@@ -98,6 +110,11 @@ func (c *Car) Snapshot() CarView {
 		MaxBattery:      c.maxBattery,
 		State:           c.state,
 		TargetStationID: c.targetStationID,
+		TravelTimeMin:   c.travelTimeMin,
+		WaitingTimeMin:  c.waitingTimeMin,
+		ChargingTimeMin: c.chargingTimeMin,
+		DistanceKm:      c.distanceKm,
+		StationChanges:  c.stationChanges,
 	}
 }
 
@@ -156,6 +173,13 @@ func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut ch
 func (c *Car) Step(now types.SimTime) CarAction {
 	c.receiveReplies()
 
+	switch c.state {
+	case StateInLine:
+		c.waitingTimeMin++
+	case StateCharging:
+		c.chargingTimeMin++
+	}
+
 	percept := CarPerception{
 		CurrentTick:  now,
 		NodePosition: c.currentNode,
@@ -193,6 +217,9 @@ func (c *Car) moveNextNode() {
 
 	c.currentNode = nextNode
 	c.path = c.path[1:]
+
+	c.travelTimeMin++
+	c.distanceKm += dist / 1000
 
 	c.batteryLevel -= (dist * c.consumption) / (c.maxBattery * 1000)
 	if c.batteryLevel <= 0 {
@@ -256,7 +283,7 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			var bestStationNode types.NodeID
 			var bestPath []types.NodeID
 			var minDist float64 = -1
-
+			
 			for _, info := range percept.StationInfos {
 				pathSt, dist, err := c.Map.ShortestPath(c.currentNode, info.NodeID)
 				if err == nil && (minDist < 0 || dist < minDist) {
@@ -265,6 +292,10 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 					bestStationNode = info.NodeID
 					bestPath = pathSt
 				}
+			}
+
+			if c.targetStationID != 0 && c.targetStationID != bestStation {
+				c.stationChanges++
 			}
 
 			c.targetStationID = bestStation
@@ -373,11 +404,19 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			TargetNode: 0,
 		}
 
-	case StateCharging:
+		case StateCharging:
 		if c.registry != nil {
 			return CarAction{
-				CarID: c.id,
-				Type: ActionCharge,
+				CarID:      c.id,
+				Type:       ActionCharge,
+				TargetNode: 0,
+			}
+		}
+		if c.batteryLevel >= 1.0 {
+			c.state = StateInRoute
+			return CarAction{
+				CarID:      c.id,
+				Type:       ActionStopCharge,
 				TargetNode: 0,
 			}
 		}
@@ -426,6 +465,7 @@ func (c *Car) receiveReplies() {
 					_, c.destNode = c.Map.RandomOriginDestination(c.Rng)
 					c.path, _, _ = c.Map.ShortestPath(c.currentNode, c.destNode)
 				}
+				c.targetStationID = 0
 			}
 		default:
 			return
