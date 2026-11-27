@@ -222,16 +222,25 @@ func (c *Car) moveNextNode() {
 	c.distanceKm += dist / 1000
 
 	c.batteryLevel -= (dist * c.consumption) / (c.maxBattery * 1000)
-	if c.batteryLevel <= 0 {
-		c.batteryLevel = 0
-		c.state = StateBrokenDown
-		return
-	}
-
-	// Check arrival at destination
-	if c.state == StateInRoute && c.currentNode == c.destNode {
+	if c.state == StateToStation {
+		for _, stNode := range c.Map.Stations() {
+			if c.currentNode == stNode {
+				c.state = StateAtStation
+				c.path = nil
+				break
+			}
+		}
+	} else if c.state == StateInRoute && c.currentNode == c.destNode {
 		c.state = StateArrivedDestination
 		c.path = nil
+	}
+
+	if c.batteryLevel <= 0 {
+		c.batteryLevel = 0
+		if c.state != StateAtStation {
+			c.state = StateBrokenDown
+			return
+		}
 	}
 }
 
@@ -277,6 +286,15 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 
 	switch c.state {
 	case StateInRoute:
+		if c.currentNode == c.destNode {
+			c.state = StateArrivedDestination
+			c.path = nil
+			return CarAction{
+				CarID: c.id,
+				Type: ActionType("NONE"),
+				TargetNode: c.destNode,
+			}
+		}
 		_, distDest, _ := c.Map.ShortestPath(c.currentNode, c.destNode)
 		if c.batteryLevel < 0.25 || distDest > c.Range() {
 			var bestStation types.StationID
