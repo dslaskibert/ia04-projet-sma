@@ -22,12 +22,13 @@ type chargeRequest struct {
 	charged   float64                    // énergie déjà donnée
 	cost      types.Cost                 // ce qu'elle doit déjà payer (en euros), compté à chaque tour
 	pos       int                        // dernière position qu'on lui a annoncée (0 = branchée)
+	arrivedAt types.SimTime              // tour où elle est arrivée à la station (pour mesurer son attente)
 	reply     chan messages.StationReply // pour répondre à la voiture
 }
 
 // une borne de recharge de la station
 type Pump struct {
-	PowerKW float64        // puissance de la borne (en kW)
+	PowerKW float64        // puissance nominale de la borne (en kW)
 	Broken  bool           // true si la borne est en panne
 	Car     *chargeRequest // voiture branchée (nil = borne libre)
 }
@@ -38,9 +39,33 @@ type Station struct {
 	node    types.NodeID    // nœud du graphe où se trouve la station
 	pumps   []Pump          // les bornes
 	queue   []chargeRequest // la file d'attente (le premier arrivé est à l'indice 0, c'est la position 1 pour la voiture)
-	price   types.Price     // prix en centimes d'euro par kWh
+	price   types.Price     // prix en euros par kWh
 	revenue types.Cost      // ce que la station a gagné (en euros)
 	inbox   chan any        // boîte aux lettres : les messages des voitures arrivent ici
+
+	// compteurs cumulés depuis le début de la simu (StationState dans le contrat d'Arthur)
+	servedCars      int     // recharges terminées (finies ou arrêtées avant la fin)
+	energySold      float64 // énergie vendue (en kWh)
+	totalWaitingMin int64   // somme des attentes terminées (en minutes, 1 tour = 1 minute)
+	completedWaits  int     // nombre d'attentes terminées
+}
+
+// États d'une borne et d'une station, avec les valeurs du contrat d'Arthur
+const (
+	PumpAvailable = "available" // libre
+	PumpOccupied  = "occupied"  // une voiture est branchée
+	PumpBroken    = "broken"    // en panne
+
+	StationOperational  = "operational"    // au moins une borne marche
+	StationOutOfService = "out_of_service" // toutes les bornes sont en panne
+)
+
+// PumpView : copie de l'état d'une borne (PumpState dans le contrat).
+// L'ID de la borne, c'est sa place dans la liste : p1, p2, ...
+type PumpView struct {
+	Status  string      // PumpAvailable, PumpOccupied ou PumpBroken
+	CarID   types.CarID // voiture branchée (seulement si Status vaut PumpOccupied)
+	PowerKW float64     // puissance nominale (en kW)
 }
 
 // StationView : copie de l'état de la station, pour l'interface et les voitures
@@ -48,11 +73,20 @@ type Station struct {
 type StationView struct {
 	ID          types.StationID
 	Node        types.NodeID
+	Status      string // StationOperational ou StationOutOfService
 	NbPumps     int
 	FreePumps   int
 	QueueLength int
-	Price       types.Price
-	Revenue     types.Cost // en euros
+	Queue       []types.CarID // les voitures de la file, dans l'ordre (sans celles qui sont branchées)
+	Pumps       []PumpView    // les bornes, dans l'ordre
+	Price       types.Price   // en euros par kWh
+	Revenue     types.Cost    // en euros
+
+	// compteurs cumulés depuis le début de la simu
+	ServedCars      int     // recharges terminées (finies ou arrêtées avant la fin)
+	EnergySoldKWh   float64 // énergie vendue
+	TotalWaitingMin int64   // somme des attentes terminées, en minutes
+	CompletedWaits  int     // nombre d'attentes terminées : attente moyenne = TotalWaitingMin / CompletedWaits
 }
 
 // NewStation crée une station avec nbPumps bornes de puissance powerKW
@@ -114,12 +148,13 @@ func (s *Station) receiveMessages(t types.SimTime) {
 // Dans les deux cas on lui répond avec sa position :
 // 0 = branchée tout de suite, 1 = première de la file, etc.
 func (s *Station) arrive(m messages.ArriveMessage, t types.SimTime) {
-	req := chargeRequest{carID: m.CarID, neededKWh: m.NeededKWh, reply: m.ReplyChan}
+	req := chargeRequest{carID: m.CarID, neededKWh: m.NeededKWh, reply: m.ReplyChan, arrivedAt: t}
 
 	if len(s.queue) == 0 {
 		for i := range s.pumps {
 			if !s.pumps[i].Broken && s.pumps[i].Car == nil {
 				s.pumps[i].Car = &req
+				s.completedWaits++ // elle n'a pas attendu : une attente de 0 minute
 				fmt.Printf("[%s] tour %d : voiture %d branchée\n", s.Name(), t, m.CarID)
 				s.notify(req.reply, messages.QueuePositionMessage{CarID: m.CarID, Position: 0, EstimatedWaitTicks: 0})
 				return
@@ -205,7 +240,7 @@ func (s *Station) estimateWait(pos int) int {
 
 // step : ce que fait la station pendant 1 pas de temps (= 1 minute).
 // Renvoie les recharges qui se sont terminées pendant ce tour.
-func (s *Station) step(_ types.SimTime) []messages.ChargeFinishedMessage {
+func (s *Station) step(now types.SimTime) []messages.ChargeFinishedMessage {
 	var finished []messages.ChargeFinishedMessage
 
 	// 1. Recharger les voitures branchées
@@ -224,6 +259,7 @@ func (s *Station) step(_ types.SimTime) []messages.ChargeFinishedMessage {
 		// (comme ça ce sera juste quand le prix changera pendant une recharge)
 		p.Car.cost += s.cost(energy)
 		s.revenue += s.cost(energy)
+		s.energySold += energy
 
 		// La voiture est pleine : elle part, la borne se libère.
 		// On compare à 1e-9 et pas à 0 à cause des arrondis des float
@@ -242,6 +278,10 @@ func (s *Station) step(_ types.SimTime) []messages.ChargeFinishedMessage {
 			req := s.queue[0]
 			s.queue = s.queue[1:]
 			s.pumps[i].Car = &req
+			// son attente est finie : elle a attendu du tour où elle est arrivée jusqu'à
+			// ce tour compris (elle ne recharge qu'à partir du tour suivant)
+			s.totalWaitingMin += int64(now-req.arrivedAt) + 1
+			s.completedWaits++
 		}
 	}
 
@@ -262,6 +302,7 @@ func (s *Station) finishCharge(i int) messages.ChargeFinishedMessage {
 	}
 	s.notify(car.reply, msg)
 	s.pumps[i].Car = nil
+	s.servedCars++
 	return msg
 }
 
@@ -294,9 +335,9 @@ func (s *Station) sendPositions() {
 	}
 }
 
-// cost : prix de kWh kilowattheures, en euros (le prix de la station est en centimes par kWh)
+// cost : prix de kWh kilowattheures, en euros (le prix de la station est en euros par kWh)
 func (s *Station) cost(kWh float64) types.Cost {
-	return types.Cost(kWh * float64(s.price) / 100)
+	return types.Cost(kWh * float64(s.price))
 }
 
 // notify : envoie une réponse à la voiture.
@@ -326,14 +367,44 @@ func (s *Station) freePumps() int {
 
 // Snapshot : renvoie une copie de l'état de la station.
 // À appeler entre deux tours (quand la station ne travaille pas), comme pour les voitures.
+// Les listes sont recopiées : modifier la vue ne change pas la station.
 func (s *Station) Snapshot() StationView {
+	queue := make([]types.CarID, len(s.queue))
+	for i, req := range s.queue {
+		queue[i] = req.carID
+	}
+
+	status := StationOutOfService
+	pumps := make([]PumpView, len(s.pumps))
+	for i, p := range s.pumps {
+		pumps[i] = PumpView{Status: PumpAvailable, PowerKW: p.PowerKW}
+		if p.Broken {
+			pumps[i].Status = PumpBroken
+		} else {
+			status = StationOperational // au moins une borne marche
+		}
+		if p.Car != nil {
+			pumps[i].CarID = p.Car.carID
+			if !p.Broken {
+				pumps[i].Status = PumpOccupied
+			}
+		}
+	}
+
 	return StationView{
-		ID:          s.id,
-		Node:        s.node,
-		NbPumps:     len(s.pumps),
-		FreePumps:   s.freePumps(),
-		QueueLength: len(s.queue),
-		Price:       s.price,
-		Revenue:     s.revenue,
+		ID:              s.id,
+		Node:            s.node,
+		Status:          status,
+		NbPumps:         len(s.pumps),
+		FreePumps:       s.freePumps(),
+		QueueLength:     len(s.queue),
+		Queue:           queue,
+		Pumps:           pumps,
+		Price:           s.price,
+		Revenue:         s.revenue,
+		ServedCars:      s.servedCars,
+		EnergySoldKWh:   s.energySold,
+		TotalWaitingMin: s.totalWaitingMin,
+		CompletedWaits:  s.completedWaits,
 	}
 }
