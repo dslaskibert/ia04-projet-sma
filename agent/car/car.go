@@ -7,6 +7,7 @@ import (
 
 	"github.com/dslaskibert/ia04-projet-sma/agent"
 	"github.com/dslaskibert/ia04-projet-sma/environment"
+	"github.com/dslaskibert/ia04-projet-sma/messages"
 	"github.com/dslaskibert/ia04-projet-sma/types"
 )
 
@@ -59,21 +60,23 @@ type CarAction struct {
 }
 
 type Car struct {
-	id          types.CarID
-	originNode  types.NodeID
-	destNode    types.NodeID
-	currentNode types.NodeID
-	path        []types.NodeID
+	id          		types.CarID
+	originNode  		types.NodeID
+	destNode    		types.NodeID
+	currentNode 		types.NodeID
+	path        		[]types.NodeID
 
-	batteryLevel float64
-	maxBattery   float64
-	consumption  float64
+	batteryLevel 		float64
+	maxBattery   		float64
+	consumption  		float64
 
-	state           CarState
-	targetStationID types.StationID
+	state           	CarState
+	targetStationID 	types.StationID
 
-	Map environment.Map
-	Rng *rand.Rand
+	Map 				environment.Map
+	Rng 				*rand.Rand
+	registry 			types.Registry
+	replyChan			chan messages.StationReply
 }
 
 type CarView struct {
@@ -98,6 +101,14 @@ func (c *Car) Snapshot() CarView {
 	}
 }
 
+func (c *Car) ID() types.CarID {
+	return c.id
+}
+
+func (c *Car) Position() types.NodeID {
+	return c.currentNode
+}
+
 func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consumption float64, envMap environment.Map, rng *rand.Rand) *Car {
 	return &Car{
 		id:           id,
@@ -110,7 +121,12 @@ func NewCar(id types.CarID, orig, dest types.NodeID, battery, maxBattery, consum
 		state:        StateInRoute,
 		Map:          envMap,
 		Rng:          rng,
+		replyChan: 	  make(chan messages.StationReply, 10),
 	}
+}
+
+func (c *Car) SetRegistry(reg types.Registry) {
+	c.registry = reg
 }
 
 func (c *Car) Name() string {
@@ -138,6 +154,8 @@ func (c *Car) Start(ctx context.Context, tickIn <-chan types.SimTime, doneOut ch
 
 // Step builds the current perception, triggers decision making and returns the chosen action
 func (c *Car) Step(now types.SimTime) CarAction {
+	c.receiveReplies()
+
 	percept := CarPerception{
 		CurrentTick:  now,
 		NodePosition: c.currentNode,
@@ -176,7 +194,7 @@ func (c *Car) moveNextNode() {
 	c.currentNode = nextNode
 	c.path = c.path[1:]
 
-	c.batteryLevel -= (dist * c.consumption) / c.maxBattery
+	c.batteryLevel -= (dist * c.consumption) / (c.maxBattery * 1000)
 	if c.batteryLevel <= 0 {
 		c.batteryLevel = 0
 		c.state = StateBrokenDown
@@ -216,7 +234,7 @@ func (c *Car) Range() float64 {
 	if c.consumption <= 0 {
 		return 0
 	}
-	return (c.batteryLevel * c.maxBattery) / c.consumption
+	return (c.batteryLevel * c.maxBattery / c.consumption) * 1000
 }
 
 // Decide determines the next action based on current state and perception
@@ -310,6 +328,21 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 		}
 
 	case StateAtStation:
+		if c.registry != nil {
+			st := c.registry.StationByID(c.targetStationID)
+			st.Inbox() <- messages.ArriveMessage{
+				CarID:     c.id,
+				NeededKWh: (1.0 - c.batteryLevel) * c.maxBattery,
+				ReplyChan: c.replyChan,
+			}
+			c.state = StateInLine
+			return CarAction{
+				CarID:      c.id,
+				Type:       ActionEnterQueue,
+				TargetNode: 0,
+			}
+		}
+
 		if queueLength > 0 {
 			c.state = StateInLine
 			return CarAction{
@@ -341,13 +374,10 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 		}
 
 	case StateCharging:
-		c.batteryLevel += 0.20 // just testing, this will be removed after
-		if c.batteryLevel >= 1.0 {
-			c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
-			c.state = StateInRoute
+		if c.registry != nil {
 			return CarAction{
-				CarID:      c.id,
-				Type:       ActionStopCharge,
+				CarID: c.id,
+				Type: ActionCharge,
 				TargetNode: 0,
 			}
 		}
@@ -369,6 +399,36 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			CarID:      c.id,
 			Type:       ActionType("NONE"),
 			TargetNode: 0,
+		}
+	}
+}
+
+func (c *Car) receiveReplies() {
+	if c.replyChan == nil {
+		return
+	}
+	for {
+		select {
+		case rep := <- c.replyChan:
+			switch m := rep.(type) {
+			case messages.QueuePositionMessage:
+				if m.Position == 0 {
+					c.state = StateCharging
+				}
+			case messages.ChargeFinishedMessage:
+				c.batteryLevel += m.EnergyGiven / c.maxBattery
+				if c.batteryLevel > 1.0 {
+					c.batteryLevel = 1.0
+				}
+				c.state = StateInRoute
+				c.path = nil
+				if c.Map != nil && c.Rng != nil {
+					_, c.destNode = c.Map.RandomOriginDestination(c.Rng)
+					c.path, _, _ = c.Map.ShortestPath(c.currentNode, c.destNode)
+				}
+			}
+		default:
+			return
 		}
 	}
 }

@@ -30,10 +30,11 @@ func main() {
 	agtTest := agent.NewAgentTest("test", types.AgentTypeTest)
 	simu.RegisterAgent(agtTest)
 	
-	for i := 1; i <= 2; i++ {
+	for i := 1; i <= 10; i++ {
 		rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(i*1000)))
 		orig, dest := carte.RandomOriginDestination(rng)
-		car := car.NewCar(types.CarID(i), orig, dest, 0.8, 1000, 0.2, carte, rng) // just testing with 1000%
+		car := car.NewCar(types.CarID(i), orig, dest, 0.8, 20, 5, carte, rng) // testing values
+		car.SetRegistry(simu)
 		simu.RegisterAgent(car)
 	}
 
@@ -46,6 +47,6 @@ func main() {
 	// Lancer la simulation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	simu.Run(ctx, 20)
+	simu.Run(ctx, 50)
 
 }
