@@ -63,7 +63,7 @@ type Car struct {
 	originNode  types.NodeID
 	destNode    types.NodeID
 	currentNode types.NodeID
-	path		[]types.NodeID
+	path        []types.NodeID
 
 	batteryLevel float64
 	maxBattery   float64
@@ -77,25 +77,24 @@ type Car struct {
 }
 
 type CarView struct {
-	ID 					types.CarID
-	CurrentNode 		types.NodeID
-	DestNode			types.NodeID
-	BatteryLevel		float64
-	MaxBattery 			float64
-	State				CarState
-	TargetStationID		types.StationID
-
+	ID              types.CarID
+	CurrentNode     types.NodeID
+	DestNode        types.NodeID
+	BatteryLevel    float64
+	MaxBattery      float64
+	State           CarState
+	TargetStationID types.StationID
 }
 
 func (c *Car) Snapshot() CarView {
 	return CarView{
-		ID: 				c.id,
-		CurrentNode: 		c.currentNode,
-		DestNode:			c.destNode,
-		BatteryLevel:		c.batteryLevel,
-		MaxBattery: 		c.maxBattery,
-		State:				c.state,
-		TargetStationID:	c.targetStationID,
+		ID:              c.id,
+		CurrentNode:     c.currentNode,
+		DestNode:        c.destNode,
+		BatteryLevel:    c.batteryLevel,
+		MaxBattery:      c.maxBattery,
+		State:           c.state,
+		TargetStationID: c.targetStationID,
 	}
 }
 
@@ -277,9 +276,8 @@ func (c *Car) Decide(percept CarPerception) CarAction {
 			if info.StationID == c.targetStationID {
 				stationNode = info.NodeID
 				break
-if c.batteryLevel >= 1.0 {
-c.batteryLevel = 1.0 // the car won't leave with more than 100% battery
-c.state = StateInRoute
+			}
+		}
 
 		if c.currentNode == stationNode {
 			c.state = StateAtStation
