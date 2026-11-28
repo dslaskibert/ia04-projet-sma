@@ -27,9 +27,12 @@ func main() {
 	rng := rand.New(rand.NewSource(cfg.Seed))
 
 	// Carte
-	// TODO: passer stationPositions dans la config
-	stationPositions := [][2]int{{3, 2}, {7, 3}}
-	carte := gridmap.NewGridMap(cfg.Map.Width, cfg.Map.Height, 100.0, stationPositions)
+	carte := gridmap.NewGridMap(
+		cfg.Map.Width,
+		cfg.Map.Height,
+		cfg.Map.NodeSpacingM,
+		cfg.Map.StationPositions,
+	)
 	carte.Print()
 
 	// Simulation
@@ -40,6 +43,7 @@ func main() {
 	simu.RegisterAgent(agtTest)
 
 	// Voitures : chacune a son propre RNG, seedé depuis le RNG principal
+	// TODO: passer aussi cfg.Cars.BatteryThreshold à NewCar quand le champ sera ajouté
 	for i := 1; i <= cfg.Cars.Count; i++ {
 		orig, dest := carte.RandomOriginDestination(rng)
 		carRng := rand.New(rand.NewSource(rng.Int63()))
@@ -47,8 +51,8 @@ func main() {
 			types.CarID(i),
 			orig, dest,
 			cfg.Cars.InitialBattery,
-			cfg.Cars.MaxBattery,
-			cfg.Cars.Consumption,
+			cfg.Cars.MaxBatteryKWh,
+			cfg.Cars.ConsumptionKWhPerKm,
 			carte,
 			carRng,
 		)
@@ -56,14 +60,14 @@ func main() {
 	}
 
 	// Stations
-	// TODO: ajouter pump_power_kw et price_centimes_per_kwh dans la config
+	// TODO: quand la PR euros de Judith sera mergée, types.Price(cfg.Stations.PriceEurosPerKWh) sans le *100
 	for i, node := range carte.Stations() {
 		st := station.NewStation(
 			types.StationID(i+1),
 			node,
 			cfg.Stations.PumpsPerStation,
-			50,
-			30,
+			cfg.Stations.PumpPowerKW,
+			types.Price(cfg.Stations.PriceEurosPerKWh*100),
 		)
 		simu.RegisterAgent(st)
 	}

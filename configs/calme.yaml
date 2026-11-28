@@ -1,0 +1,24 @@
+# Scénario calme : peu de voitures, batterie confortable
+seed: 7
+max_ticks: 100
+
+map:
+  type: grid
+  width: 10
+  height: 5
+  node_spacing_m: 100.0
+  station_positions:
+    - [3, 2]
+    - [7, 3]
+
+cars:
+  count: 3
+  initial_battery: 0.9
+  max_battery_kwh: 100.0
+  consumption_kwh_per_km: 0.05
+  battery_threshold: 0.25
+
+stations:
+  pumps_per_station: 4
+  pump_power_kw: 50.0
+  price_euros_per_kwh: 0.30
